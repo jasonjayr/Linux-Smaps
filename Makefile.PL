@@ -1,6 +1,13 @@
 use 5.008;
 use ExtUtils::MakeMaker;
 
+unless ($^O eq 'linux') {
+    warn "This is Linux only software\n";
+    exit 0;
+}
+
+exit 0 if $ENV{AUTOMATED_TESTING} and !open my $f, '<', '/proc/self/smaps';
+
 warn <<"EOF" unless( -f "/proc/$$/smaps" );
 WARNING: /proc/$$/smaps not found. Maybe your kernel lacks the feature.
 Maybe the proc filesystem is mounted on another location. A few tests
@@ -12,16 +19,13 @@ EOF
 WriteMakefile(
     NAME              => 'Linux::Smaps',
     VERSION_FROM      => 'lib/Linux/Smaps.pm', # finds $VERSION
-    PREREQ_PM         => {
-			  'Class::Member'=>1.3,
-			 }, # e.g., Module::Name => 1.1
-    ($] >= 5.005 ?     ## Add these new keywords supported since 5.005
-      (ABSTRACT_FROM  => 'lib/Linux/Smaps.pm', # retrieve abstract from module
-       AUTHOR         => 'Torsten Foertsch <torsten.foertsch@gmx.net>') : ()),
+    PREREQ_PM         => {},
+    ABSTRACT_FROM     => 'lib/Linux/Smaps.pm',
+    AUTHOR            => 'Torsten Förtsch <torsten.foertsch@gmx.net>',
     dist              => {
+			  COMPRESS => 'gzip -9f',
 			  PREOP => './mk_README.sh',
 			 },
-    PMLIBDIRS         => ['lib'],
 );
 
 sub MY::postamble {

@@ -6,7 +6,9 @@ t/double-vdso
 t/single-vdso
 t/smaps
 t/smaps64
-t/Linux-Smaps.t
+t/01.t
+t/02.t
+t/03.t
 lib/Linux/Smaps.pm
 mk_README.sh
 perl-Linux-Smaps.spec

@@ -4,37 +4,80 @@ use 5.008;
 use strict;
 use warnings FATAL=>'all';
 no warnings qw(uninitialized portable);
-use Class::Member::HASH qw{pid lasterror filename procdir
-			   _elem -CLASS_MEMBERS};
 
-our $VERSION = '0.06';
+my $min_vma_off;
+
+BEGIN {
+  package Linux::Smaps::VMA;
+
+  use strict;
+  BEGIN {
+    our @attributes=qw(vma_start vma_end r w x mayshare file_off
+		       dev_major dev_minor inode file_name is_deleted);
+    our %attributes;
+    for( my $i=0; $i<@attributes; $i++ ) {
+      no strict 'refs';
+      my $n=$i;
+      *{__PACKAGE__.'::'.$attributes[$n]}=
+	$attributes{$attributes[$n]}=
+	  sub : lvalue {@_>1 ? $_[0]->[$n]=$_[1] : $_[0]->[$n]};
+      my $const=sub () {$n};
+      *{__PACKAGE__.'::M_'.$attributes[$n]}=$const;
+      *{'Linux::Smaps::V_'.$attributes[$n]}=$const;
+      $Linux::Smaps::VMA::attr_idx{$attributes[$n]}=$n;
+    }
+    $min_vma_off=@attributes;
+  }
+
+  sub new {bless [@_[1..$#_]]=>(ref $_[0] ? ref $_[0] : $_[0])}
+}
+
+BEGIN {
+  our @attributes=qw{pid lasterror filename procdir _elem};
+  our %attributes;
+  for( my $i=0; $i<@attributes; $i++ ) {
+    my $n=$i;
+    die "Internal Error"	# should not happen
+      if exists $Linux::Smaps::VMA::attributes{$attributes[$n]};
+    no strict 'refs';
+    *{__PACKAGE__.'::'.$attributes[$n]}=
+      $attributes{$attributes[$n]}=
+	sub : lvalue {@_>1 ? $_[0]->[$n]=$_[1] : $_[0]->[$n]};
+    *{__PACKAGE__.'::M_'.$attributes[$n]}=sub () {$n};
+  }
+}
+
+our $VERSION = '0.07';
 
 sub new {
   my $class=shift;
   $class=ref($class) if( ref($class) );
-  my $I=bless {}=>$class;
+  my $I=bless []=>$class;
   my %h;
 
-  $I->procdir='/proc';
-  $I->pid='self';
+  $I->[M_procdir]='/proc';
+  $I->[M_pid]='self';
 
   if( @_==1 ) {
-    $I->pid=shift;
+    $I->[M_pid]=shift;
   } else {
-    our @CLASS_MEMBERS;
+    our @attributes;
+    our %attributes;
     %h=@_;
-    foreach my $k (@CLASS_MEMBERS) {
-      $I->$k=$h{$k} if( exists $h{$k});
+    foreach my $k (@attributes) {
+      $attributes{$k}->($I, $h{$k}) if exists $h{$k};
     }
   }
 
   return $I if( $h{uninitialized} );
 
   my $rc=$I->update;
-  die __PACKAGE__.": ".$I->lasterror."\n" unless( $rc );
+  die __PACKAGE__.": ".$I->[M_lasterror]."\n" unless( $rc );
 
   return $rc;
 }
+
+my ($cnt1, $fmt1)=(0);
 
 sub update {
   my $I=shift;
@@ -46,81 +89,89 @@ sub update {
   #   $smaps->pid=$_; $smaps->update;
   #   process($smaps);
   # }
-  if( defined $I->filename ) {
-    $name=$I->filename;
+  if( defined $I->[M_filename] ) {
+    $name=$I->[M_filename];
   } else {
-    $name=$I->procdir.'/'.$I->pid.'/smaps';
+    $name=$I->[M_procdir].'/'.$I->[M_pid].'/smaps';
   }
 
   open my $f, '<', $name or do {
-    $I->lasterror="Cannot open $name: $!";
+    $I->[M_lasterror]="Cannot open $name: $!";
     return;
   };
 
   my $current;
-  $I->_elem=[];
+  $I->[M__elem]=[];
   my %cache;
   my $l;
+  my $current_off=@Linux::Smaps::VMA::attributes;
+
   while( defined($l=<$f>) ) {
-    if( $l=~/([\da-f]+)-([\da-f]+)\s                # range
-             ([r\-])([w\-])([x\-])([sp])\s          # access mode
-             ([\da-f]+)\s                           # page offset in file
-             ([\da-f]+):([\da-f]+)\s                # device
-             (\d+)\s*                               # inode
-             (.*?)		                    # file name
-	     (\s\(deleted\))?$
-	    /xi ) {
-      $current=Linux::Smaps::VMA->new;
-      $current->vma_start=hex $1;
-      $current->vma_end=hex $2;
-      unless( exists $cache{$current->vma_start."\0".$current->vma_end} ) {
-	$cache{$current->vma_start."\0".$current->vma_end}=1;
-	push @{$I->_elem}, $current;
-	$current->r=($3 eq 'r');
-	$current->w=($4 eq 'w');
-	$current->x=($5 eq 'x');
-	$current->mayshare=($6 eq 's');
-	$current->file_off=hex $7;
-	$current->dev_major=hex $8;
-	$current->dev_minor=hex $9;
-	$current->inode=$10;
-	$current->file_name=$11;
-	$current->is_deleted=defined( $12 );
-      }
+    if( $current_off<@Linux::Smaps::VMA::attributes ) {
+      no warnings qw(numeric);
+      $current->[$current_off++]=0+(unpack $fmt1, $l)[0];
     } elsif( $l=~/^(\w+):\s*(\d+) kB$/ ) {
       my $m=lc $1;
-      $m=~s/\s/_/g;
-      unless( $current->can($m) ) {
-	if( $I->can($m) ) {
-	  $I->lasterror=(__PACKAGE__."::$m method is already defined while ".
-			 "Linux::Smaps::VMA::$m is not");
-	  return;
-	}
 
+      if( exists $Linux::Smaps::VMA::attributes{$m} ) {
+	$I->[M_lasterror]="Linux::Smaps::VMA::$m method is already defined";
+	return;
+      }
+      if( exists $Linux::Smaps::attributes{$m} ) {
+	$I->[M_lasterror]="Linux::Smaps::$m method is already defined";
+	return;
+      }
+
+      $current->[$current_off++]=0+$2;
+
+      push @Linux::Smaps::VMA::attributes, $m;
+      {
 	no strict 'refs';
-	*{__PACKAGE__."::$m"}=sub {
-	  my $I=shift;
-	  my $n=shift;
+	my $n=$#Linux::Smaps::VMA::attributes;
+	*{'Linux::Smaps::VMA::'.$m}=
+	  $Linux::Smaps::VMA::attributes{$m}=
+	    sub : lvalue {@_>1 ? $_[0]->[$n]=$_[1] : $_[0]->[$n]};
+	$Linux::Smaps::VMA::attr_idx{$m}=$n;
+      }
+
+      {
+	no strict 'refs';
+	my $attr_nr=$#Linux::Smaps::VMA::attributes;
+	*{__PACKAGE__."::$m"}=$Linux::Smaps::attributes{$m}=sub {
+	  my ($I, $n)=@_;
 	  my $rc=0;
-	  my @l;
-	  if( length $n ) {
-	    local $_;
-	    @l=grep {$_->file_name eq $n} @{$I->_elem};
-	  } else {
-	    @l=@{$I->_elem};
-	  }
-	  foreach my $el (@l) {
-	    $rc+=$el->$m;
+	  foreach my $el (length $n
+			  ? grep($_->[V_file_name] eq $n, @{$I->[M__elem]})
+			  : @{$I->[M__elem]}) {
+	    $rc+=$el->[$attr_nr];
 	  }
 	  return $rc;
 	};
-
-	package Linux::Smaps::VMA;
-	Class::Member::HASH->import($m);
       }
-      $current->$m=$2;
+
+      if( length($m)>$cnt1 ) {
+	$cnt1=length($m);
+	$fmt1="x".($cnt1+1)."A*";
+      }
+    } elsif( $l=~/^
+		  ([\da-f]+)-([\da-f]+)\s                # range
+		  ([r\-])([w\-])([x\-])([sp])\s          # access mode
+		  ([\da-f]+)\s                           # page offset in file
+		  ([\da-f]+):([\da-f]+)\s                # device
+		  (\d+)\s*                               # inode
+		  (.*?)				         # file name
+		  (\s\(deleted\))?$
+		 /xi ) {
+      $current=bless [hex($1), hex($2), ($3 eq 'r'), ($4 eq 'w'), ($5 eq 'x'),
+		      ($6 eq 's'), hex($7), hex($8), hex($9), $10, $11,
+		      defined($12)], 'Linux::Smaps::VMA';
+
+      # work around a bug in some implementations, [vdso] may be reported
+      # twice.
+      push @{$I->[M__elem]}, $current unless $cache{"$1\0$2"}++;
+      $current_off=$min_vma_off;
     } else {
-      $I->lasterror="$name($.): not parsed: $l";
+      $I->[M_lasterror]="$name($.): not parsed: $l";
       return;
     }
   }
@@ -132,34 +183,26 @@ sub update {
 
 BEGIN {
   foreach my $n (qw{heap stack vdso vsyscall}) {
-    eval <<"EOE";
-    sub $n {
-      my \$I=shift;
-      local \$_;
-      return (grep {'[$n]' eq \$_->file_name} \@{\$I->_elem})[0];
-    }
-EOE
-    die "$@" if( $@ );
+    no strict 'refs';
+    my $name=$n;
+    my $s="[$n]";
+    *{__PACKAGE__.'::'.$name}=sub {
+      return (grep {$s eq $_->[V_file_name]} @{$_[0]->[M__elem]})[0];
+    };
   }
 }
 
 sub unnamed {
   my $I=shift;
   if( wantarray ) {
-    local $_;
-    return grep {!length $_->file_name} @{$I->_elem};
+    return grep {!length $_->[V_file_name]} @{$I->[M__elem]};
   } else {
-    my $sum=Linux::Smaps::VMA->new;
-    $sum->size=$sum->rss=$sum->shared_clean=$sum->shared_dirty=
-      $sum->private_clean=$sum->private_dirty=0;
-    foreach my $el (@{$I->_elem}) {
-      next if( length $el->file_name );
-      $sum->size+=$el->size;
-      $sum->rss+=$el->rss;
-      $sum->shared_clean+=$el->shared_clean;
-      $sum->shared_dirty+=$el->shared_dirty;
-      $sum->private_clean+=$el->private_clean;
-      $sum->private_dirty+=$el->private_dirty;
+    my @idx=@Linux::Smaps::VMA::attr_idx{qw/size rss shared_clean shared_dirty
+					   private_clean private_dirty/};
+    my $sum=Linux::Smaps::VMA->new((0)x@Linux::Smaps::VMA::attributes);
+    foreach my $el (@{$I->[M__elem]}) {
+      next if( length $el->[V_file_name] );
+      foreach my $idx (@idx) {$sum->[$idx]+=$el->[$idx]}
     }
     return $sum;
   }
@@ -168,20 +211,14 @@ sub unnamed {
 sub named {
   my $I=shift;
   if( wantarray ) {
-    local $_;
-    return grep {length $_->file_name} @{$I->_elem};
+    return grep {length $_->[V_file_name]} @{$I->[M__elem]};
   } else {
-    my $sum=Linux::Smaps::VMA->new;
-    $sum->size=$sum->rss=$sum->shared_clean=$sum->shared_dirty=
-      $sum->private_clean=$sum->private_dirty=0;
-    foreach my $el (@{$I->_elem}) {
-      next if( !length $el->file_name );
-      $sum->size+=$el->size;
-      $sum->rss+=$el->rss;
-      $sum->shared_clean+=$el->shared_clean;
-      $sum->shared_dirty+=$el->shared_dirty;
-      $sum->private_clean+=$el->private_clean;
-      $sum->private_dirty+=$el->private_dirty;
+    my @idx=@Linux::Smaps::VMA::attr_idx{qw/size rss shared_clean shared_dirty
+					   private_clean private_dirty/};
+    my $sum=Linux::Smaps::VMA->new((0)x@Linux::Smaps::VMA::attributes);
+    foreach my $el (@{$I->[M__elem]}) {
+      next if( !length $el->[V_file_name] );
+      foreach my $idx (@idx) {$sum->[$idx]+=$el->[$idx]}
     }
     return $sum;
   }
@@ -190,19 +227,13 @@ sub named {
 sub all {
   my $I=shift;
   if( wantarray ) {
-    local $_;
-    return @{$I->_elem};
+    return @{$I->[M__elem]};
   } else {
-    my $sum=Linux::Smaps::VMA->new;
-    $sum->size=$sum->rss=$sum->shared_clean=$sum->shared_dirty=
-      $sum->private_clean=$sum->private_dirty=0;
-    foreach my $el (@{$I->_elem}) {
-      $sum->size+=$el->size;
-      $sum->rss+=$el->rss;
-      $sum->shared_clean+=$el->shared_clean;
-      $sum->shared_dirty+=$el->shared_dirty;
-      $sum->private_clean+=$el->private_clean;
-      $sum->private_dirty+=$el->private_dirty;
+    my @idx=@Linux::Smaps::VMA::attr_idx{qw/size rss shared_clean shared_dirty
+					   private_clean private_dirty/};
+    my $sum=Linux::Smaps::VMA->new((0)x@Linux::Smaps::VMA::attributes);
+    foreach my $el (@{$I->[M__elem]}) {
+      foreach my $idx (@idx) {$sum->[$idx]+=$el->[$idx]}
     }
     return $sum;
   }
@@ -211,8 +242,8 @@ sub all {
 sub names {
   my $I=shift;
   local $_;
-  my %h=map {($_->file_name=>1)} @{$I->_elem};
-  delete @h{'','[heap]','[stack]','[vdso]'};
+  my %h=map {($_->[V_file_name]=>1)} @{$I->[M__elem]};
+  delete @h{'',qw/[heap] [stack] [vdso] [vsyscall]/};
   return keys %h;
 }
 
@@ -220,45 +251,45 @@ sub diff {
   my $I=shift;
   my @my_special;
   my @my=map {
-    if( $_->file_name=~/\[\w+\]/ ) {
+    if( $_->[V_file_name]=~/\[\w+\]/ ) {
       push @my_special, $_;
       ();
     } else {
       $_;
     }
-  } $I->vmas;
+  } @{$I->[M__elem]};
   my %other_special;
   my %other=map {
-    if( $_->file_name=~/^(\[\w+\])$/ ) {
+    if( $_->[V_file_name]=~/^(\[\w+\])$/ ) {
       $other_special{$1}=$_;
       ();
     } else {
-      ($_->vma_start=>$_);
+      ($_->[V_vma_start]=>$_);
     }
-  } shift->vmas;
+  } @{shift->[M__elem]};
 
   my @new;
   my @diff;
   my @old;
 
   foreach my $vma (@my_special) {
-    if( exists $other_special{$vma->file_name} ) {
-      my $x=delete $other_special{$vma->file_name};
+    if( exists $other_special{$vma->[V_file_name]} ) {
+      my $x=delete $other_special{$vma->[V_file_name]};
       push @diff, [$vma, $x]
-	if( $vma->vma_start != $x->vma_start or
-	    $vma->vma_end != $x->vma_end or
+	if( $vma->[V_vma_start] != $x->[V_vma_start] or
+	    $vma->[V_vma_end] != $x->[V_vma_end] or
 	    $vma->shared_clean != $x->shared_clean or
 	    $vma->shared_dirty != $x->shared_dirty or
 	    $vma->private_clean != $x->private_clean or
 	    $vma->private_dirty != $x->private_dirty or
-	    $vma->dev_major != $x->dev_major or
-	    $vma->dev_minor != $x->dev_minor or
-	    $vma->r != $x->r or
-	    $vma->w != $x->w or
-	    $vma->x != $x->x or
-	    $vma->file_off != $x->file_off or
-	    $vma->inode != $x->inode or
-	    $vma->mayshare != $x->mayshare );
+	    $vma->[V_dev_major] != $x->[V_dev_major] or
+	    $vma->[V_dev_minor] != $x->[V_dev_minor] or
+	    $vma->[V_r] != $x->[V_r] or
+	    $vma->[V_w] != $x->[V_w] or
+	    $vma->[V_x] != $x->[V_x] or
+	    $vma->[V_file_off] != $x->[V_file_off] or
+	    $vma->[V_inode] != $x->[V_inode] or
+	    $vma->[V_mayshare] != $x->[V_mayshare] );
     } else {
       push @new, $vma;
     }
@@ -266,44 +297,38 @@ sub diff {
   @old=values %other_special;
 
   foreach my $vma (@my) {
-    if( exists $other{$vma->vma_start} ) {
-      my $x=delete $other{$vma->vma_start};
+    if( exists $other{$vma->[V_vma_start]} ) {
+      my $x=delete $other{$vma->[V_vma_start]};
       push @diff, [$vma, $x]
-	if( $vma->vma_end != $x->vma_end or
+	if( $vma->[V_vma_end] != $x->[V_vma_end] or
 	    $vma->shared_clean != $x->shared_clean or
 	    $vma->shared_dirty != $x->shared_dirty or
 	    $vma->private_clean != $x->private_clean or
 	    $vma->private_dirty != $x->private_dirty or
-	    $vma->dev_major != $x->dev_major or
-	    $vma->dev_minor != $x->dev_minor or
-	    $vma->r != $x->r or
-	    $vma->w != $x->w or
-	    $vma->x != $x->x or
-	    $vma->file_off != $x->file_off or
-	    $vma->inode != $x->inode or
-	    $vma->mayshare != $x->mayshare or
-	    $vma->file_name ne $x->file_name );
+	    $vma->[V_dev_major] != $x->[V_dev_major] or
+	    $vma->[V_dev_minor] != $x->[V_dev_minor] or
+	    $vma->[V_r] != $x->[V_r] or
+	    $vma->[V_w] != $x->[V_w] or
+	    $vma->[V_x] != $x->[V_x] or
+	    $vma->[V_file_off] != $x->[V_file_off] or
+	    $vma->[V_inode] != $x->[V_inode] or
+	    $vma->[V_mayshare] != $x->[V_mayshare] or
+	    $vma->[V_file_name] ne $x->[V_file_name] );
     } else {
       push @new, $vma;
     }
   }
-  push @old, sort {$a->vma_start <=> $b->vma_start} values %other;
+  push @old, sort {$a->[V_vma_start] <=> $b->[V_vma_start]} values %other;
 
   return \@new, \@diff, \@old;
 }
 
 sub vmas {return @{$_[0]->_elem};}
 
-package Linux::Smaps::VMA;
-
-use strict;
-use Class::Member::HASH qw(vma_start vma_end r w x mayshare file_off
-			   dev_major dev_minor inode file_name is_deleted);
-
-sub new {bless {}=>(ref $_[0] ? ref $_[0] : $_[0]);}
-
 1;
 __END__
+
+=encoding utf8
 
 =head1 NAME
 
@@ -324,17 +349,15 @@ about a processes memory consumption. It particularly includes a way to
 estimate the effect of copy-on-write. This module implements a Perl
 interface.
 
-=head2 CONSTRUCTOR, OBJECT INITIALIZATION, etc.
+=head2 Constructor, Object Initialization, etc.
 
-=over 4
+=head3 Linux::Smaps-E<gt>new
 
-=item B<< Linux::Smaps->new >>
+=head3 Linux::Smaps-E<gt>new($pid)
 
-=item B<< Linux::Smaps->new($pid) >>
+=head3 Linux::Smaps-E<gt>new(pid=E<gt>$pid, procdir=E<gt>'/proc')
 
-=item B<< Linux::Smaps->new(pid=>$pid, procdir=>'/proc') >>
-
-=item B<< Linux::Smaps->new(filename=>'/proc/self/smaps') >>
+=head3 Linux::Smaps-E<gt>new(filename=E<gt>'/proc/self/smaps')
 
 creates and initializes a C<Linux::Smaps> object. On error an exception is
 thrown. C<new()> may fail if the smaps file is not readable or if the file
@@ -347,17 +370,17 @@ the proc filesystem can be set if it differs from the standard C</proc>.
 The C<filename> parameter sets the name of the smaps file directly. This way
 also files outside the standard C</proc> tree can be analyzed.
 
-=item B<< Linux::Smaps->new(uninitialized=>1) >>
+=head3 Linux::Smaps-E<gt>new(uninitialized=E<gt>1)
 
 returns an uninitialized object. This makes C<new()> simply skip the C<update()>
 call after setting all parameters. Additional parameters like C<pid>,
 C<procdir> or C<filename> can be passed.
 
-=item B<< $self->pid($pid) >> or B<< $self->pid=$pid >>
+=head3 $self-E<gt>pid($pid) or $self-E<gt>pid=$pid
 
-=item B<< $self->procdir($dir) >> or B<< $self->procdir=$dir >>
+=head3 $self-E<gt>procdir($dir) or $self-E<gt>procdir=$dir
 
-=item B<< $self->filename($name) >> or B<< $self->filename=$name >>
+=head3 $self-E<gt>filename($name) or $self-E<gt>filename=$name
 
 get/set parameters.
 
@@ -372,38 +395,34 @@ object to allow loops like this:
      process $smaps;
  }
 
-=item B<< $self->update >>
+=head3 $self-E<gt>update
 
 reinitializes the object; rereads the underlying file. Returns the object
 or C<undef> on error. The actual reason can be obtained via C<lasterror()>.
 
-=item B<< $self->lasterror >>
+=head3 $self-E<gt>lasterror
 
 C<update()> and C<new()> return C<undef> on failure. C<lasterror()> returns
 a more verbose reason. Also C<$!> can be checked.
 
-=back
+=head2 Information Retrieval
 
-=head2 INFORMATION RETRIEVAL
-
-=over 4
-
-=item B<< $self->vmas >>
+=head3 $self-E<gt>vmas
 
 returns a list of C<Linux::Smaps::VMA> objects each describing a vm area,
 see below.
 
-=item B<< $self->size >>
+=head3 $self-E<gt>size
 
-=item B<< $self->rss >>
+=head3 $self-E<gt>rss
 
-=item B<< $self->shared_clean >>
+=head3 $self-E<gt>shared_clean
 
-=item B<< $self->shared_dirty >>
+=head3 $self-E<gt>shared_dirty
 
-=item B<< $self->private_clean >>
+=head3 $self-E<gt>private_clean
 
-=item B<< $self->private_dirty >>
+=head3 $self-E<gt>private_dirty
 
 these methods compute the sums of the corresponding values of all vmas.
 
@@ -417,19 +436,21 @@ C<^(\w+):\s*(\d+) kB$> new accessor methods are created.
 At the time of this writing at least one new field (C<referenced>) is on
 the way but all my kernels still lack it.
 
-=item B<< $self->stack >>
+=head3 $self-E<gt>stack
 
-=item B<< $self->heap >>
+=head3 $self-E<gt>heap
 
-=item B<< $self->vdso >>
+=head3 $self-E<gt>vdso
+
+=head3 $self-E<gt>vsyscall
 
 these are shortcuts to the corresponding C<Linux::Smaps::VMA> objects.
 
-=item B<< $self->all >>
+=head3 $self-E<gt>all
 
-=item B<< $self->named >>
+=head3 $self-E<gt>named
 
-=item B<< $self->unnamed >>
+=head3 $self-E<gt>unnamed
 
 In array context these functions return a list of C<Linux::Smaps::VMA>
 objects representing named or unnamed maps or simply all vmas. Thus, in
@@ -439,11 +460,11 @@ In scalar context these functions create a fake C<Linux::Smaps::VMA> object
 containing the summaries of the C<size>, C<rss>, C<shared_clean>,
 C<shared_dirty>, C<private_clean> and C<private_dirty> fields.
 
-=item B<< $self->names >>
+=head3 $self-E<gt>names
 
 returns a list of vma names, i.e. the files that are mapped.
 
-=item B<< ($new, $diff, $old)=$self->diff( $other ) >>
+=head3 ($new, $diff, $old)=$self-E<gt>diff( $other )
 
 $other is assumed to be also a C<Linux::Smaps> instance. 3 arrays are
 returned. The first one ($new) is a list of vmas that are contained in
@@ -458,58 +479,54 @@ C<vma_end>, C<r>, C<w>, C<x>, C<mayshare>, C<file_off>, C<dev_major>,
 C<dev_minor>, C<inode>, C<file_name>, C<shared_clean>, C<shared_diry>,
 C<private_clean> and C<private_dirty>.
 
-=back
-
-=head1 Linux::Smaps::VMA objects
+=head2 C<Linux::Smaps::VMA> objects
 
 normally these objects represent a single vm area:
 
-=over 4
+=head3 $self-E<gt>vma_start
 
-=item B<< $self->vma_start >>
-
-=item B<< $self->vma_end >>
+=head3 $self-E<gt>vma_end
 
 start and end address
 
-=item B<< $self->r >>
+=head3 $self-E<gt>r
 
-=item B<< $self->w >>
+=head3 $self-E<gt>w
 
-=item B<< $self->x >>
+=head3 $self-E<gt>x
 
-=item B<< $self->mayshare >>
+=head3 $self-E<gt>mayshare
 
 these correspond to the VM_READ, VM_WRITE, VM_EXEC and VM_MAYSHARE flags.
 see Linux kernel for more information.
 
-=item B<< $self->file_off >>
+=head3 $self-E<gt>file_off
 
-=item B<< $self->dev_major >>
+=head3 $self-E<gt>dev_major
 
-=item B<< $self->dev_minor >>
+=head3 $self-E<gt>dev_minor
 
-=item B<< $self->inode >>
+=head3 $self-E<gt>inode
 
-=item B<< $self->file_name >>
+=head3 $self-E<gt>file_name
 
 describe the file area that is mapped.
 
-=item B<< $self->size >>
+=head3 $self-E<gt>size
 
 the same as vma_end - vma_start but in kB.
 
-=item B<< $self->rss >>
+=head3 $self-E<gt>rss
 
 what part is resident.
 
-=item B<< $self->shared_clean >>
+=head3 $self-E<gt>shared_clean
 
-=item B<< $self->shared_dirty >>
+=head3 $self-E<gt>shared_dirty
 
-=item B<< $self->private_clean >>
+=head3 $self-E<gt>private_clean
 
-=item B<< $self->private_dirty >>
+=head3 $self-E<gt>private_dirty
 
 C<shared> means C<< page_count(page)>=2 >> (see Linux kernel), i.e. the page
 is shared between several processes. C<private> pages belong only to one
@@ -517,11 +534,11 @@ process.
 
 C<dirty> pages are written to in RAM but not to the corresponding file.
 
-=back
+=head2 Notes
 
 C<size>, C<rss>, C<shared_clean>, C<shared_dirty>, C<private_clean> and
 C<private_dirty> methods are unknown until the first call to
-C<Linux::Smaps::update()>. They are created on the fly. This is to make
+C<Linux::Smaps::update>. They are created on the fly. This is to make
 the module extendable as new features are added to the smaps file by the
 kernel. As long as the corresponding smaps file lines match
 C<^(\w+):\s*(\d+) kB$> new accessor methods are created.
@@ -611,12 +628,6 @@ processes are created from the same parent it is executed best just before
 the parent starts to fork off children. The memory lock is not inherited
 by the children. So all private pages of the children are swappable.
 
-Since we are talking about Linux only the snippet can be shortened:
-
- 0==syscall 152, 3 or die "ERROR: mlockall failed: $!\n";
-
-which removes the dependencies from F<syscall.ph> and F<sys/mmap.ph>.
-
 =head1 EXPORT
 
 Not an Exporter;
@@ -631,7 +642,7 @@ Torsten Foertsch, E<lt>torsten.foertsch@gmx.netE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2005-2007 by Torsten Foertsch
+Copyright (C) 2005-2011 by Torsten Foertsch
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself, either Perl version 5.8.5 or,
