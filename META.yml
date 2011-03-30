@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Linux-Smaps
-version:            0.07
+version:            0.08
 abstract:           a Perl interface to /proc/PID/smaps
 author:
     - Torsten Förtsch <torsten.foertsch@gmx.net>

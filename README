@@ -4,7 +4,7 @@ NAME
 SYNOPSIS
       use Linux::Smaps;
       my $map=Linux::Smaps->new($pid);
-      my @maps=$map->maps;
+      my @vmas=$map->vmas;
       my $private_dirty=$map->private_dirty;
       ...
 
@@ -19,6 +19,38 @@ DESCRIPTION
     information about a processes memory consumption. It particularly
     includes a way to estimate the effect of copy-on-write. This module
     implements a Perl interface.
+
+    The content of the smaps file is a set of blocks like this:
+
+     0060a000-0060b000 r--p 0000a000 fd:01 531212       /bin/cat
+     Size:                  4 kB
+     Rss:                   4 kB
+     Pss:                   4 kB
+     Shared_Clean:          0 kB
+     Shared_Dirty:          0 kB
+     Private_Clean:         0 kB
+     Private_Dirty:         4 kB
+     Referenced:            4 kB
+     Swap:                  0 kB
+     KernelPageSize:        4 kB
+     MMUPageSize:           4 kB
+
+    Each one describes a virtual memory area of a certain process. All those
+    areas together describe its complete address space. For the meaning of
+    the items refer to your Linux documentation.
+
+    The set of information announced by the kernel depends on its version.
+    Early versions (around Linux 2.6.14) lacked for example "Pss",
+    "Referenced", "Swap", "KernelPageSize" and "MMUPageSize". "Linux::Smaps"
+    provides an interface to all of the components. It creates accessor
+    methods dynamically depending on what the kernel reveals. The
+    "Shared_Clean" entry for example mutates to the
+    "Linux::Smaps::VMA->shared_clean" accessor. Method names are built by
+    simply lowercasing them. The actual set of methods is created when the
+    first smaps file is parsed. Subsequent "update" or "Linux::Smaps->new"
+    operations expect exactly the same file format. That means you cannot
+    parse smaps files from different kernel versions by the same perl
+    interpreter.
 
   Constructor, Object Initialization, etc.
    Linux::Smaps->new
@@ -62,6 +94,33 @@ DESCRIPTION
     object or "undef" on error. The actual reason can be obtained via
     "lasterror()".
 
+   $self->clear_refs
+    writes to the corresponding /proc/PID/clear_refs file. Thus, the amount
+    of memory reported as "Referenced" by the process is reset to 0 for all
+    VMAs.
+
+    Returns the object or "undef" on failure.
+
+    Example:
+
+     # how much memory is referenced while updating the Linux::Smaps object?
+     perl -MLinux::Smaps -le '
+       my $s=Linux::Smaps->new;
+       print $s->referenced;
+       print $s->clear_refs->update->referenced
+     '
+     2556
+     840
+
+     # how much memory is used while the shell is inactive?
+     perl -MLinux::Smaps -le '
+       my $s=Linux::Smaps->new(shift);
+       print $s->referenced;
+       print $s->clear_refs->update->referenced
+     ' $$
+     1468
+     0
+
    $self->lasterror
     "update()" and "new()" return "undef" on failure. "lasterror()" returns
     a more verbose reason. Also $! can be checked.
@@ -99,7 +158,7 @@ DESCRIPTION
    $self->named
    $self->unnamed
     In array context these functions return a list of "Linux::Smaps::VMA"
-    objects representing named or unnamed maps or simply all vmas. Thus, in
+    objects representing named or unnamed VMAs or simply all VMAs. Thus, in
     array context "all()" is equivalent to "vmas()".
 
     In scalar context these functions create a fake "Linux::Smaps::VMA"

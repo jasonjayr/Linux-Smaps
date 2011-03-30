@@ -1,6 +1,26 @@
 Revision history for Perl extension Linux::Smaps.
 
+0.08  Wed Mar 30 09:59:55 CEST 2011
+      * performance tuning
+      - postpone VMA header parsing until really needed. Here is what I
+      	get now in comparison for Linux::Smaps->new->all. "tiny" is
+	Linux::Smaps::Tiny::get_smaps_summary (Linux::Smaps::Tiny version 0.03)
+
+        v0.06: 21.1097 (20.61 usr +  0.47 sys = 21.08 CPU) @ 71.39/s (n=1505)
+        v0.07: 21.5743 (19.47 usr +  2.00 sys = 21.47 CPU) @ 319.05/s (n=6850)
+        v0.08: 20.2325 (17.81 usr +  2.32 sys = 20.13 CPU) @ 405.61/s (n=8165)
+         tiny: 21.6513 (18.16 usr +  3.25 sys = 21.41 CPU) @ 559.60/s (n=11981)
+
+	        Rate v0.06 v0.07 v0.08  tiny
+	v0.06 71.4/s    --  -78%  -82%  -87%
+	v0.07  319/s  347%    --  -21%  -43%
+	v0.08  406/s  468%   27%    --  -28%
+	tiny   560/s  684%   75%   38%    --
+
+      - clear_refs() interface
+
 0.07  Tue Mar 29 16:06:12 CEST 2011
+      * performance tuning
       - drop Class::Member usage
       - change internal object representation to arrays rather than hashes
 
