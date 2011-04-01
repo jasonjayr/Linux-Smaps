@@ -1,5 +1,8 @@
 Revision history for Perl extension Linux::Smaps.
 
+0.09  Fri Apr  1 16:14:24 CEST 2011
+      - fix the integer overflow test in t/03.t
+
 0.08  Wed Mar 30 09:59:55 CEST 2011
       * performance tuning
       - postpone VMA header parsing until really needed. Here is what I

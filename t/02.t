@@ -1,54 +1,73 @@
-use Test::More tests => 10;
+use Test::More;
 use POSIX ();
 use Linux::Smaps;
+
+sub check_readable {
+  my ($pid, $re)=@_;
+  open my $fh, '<', "/proc/$pid/smaps" or return;
+  local $/;
+  return scalar(readline $fh)=~$re;
+}
+
+BEGIN {
+  if( check_readable $$, qr/\bperl\b/ ) {
+    plan tests=>10;
+  } else {
+    plan skip_all=>
+      "Cannot read /proc/$$/smaps or didn't find 'perl' in the output";
+  }
+}
 
 POSIX::setlocale( &POSIX::LC_ALL, "C" );
 my ($s, $old);
 
-my $fn=$0;
-$fn=~s!/*t/+[^/]*$!! or die "Wrong test script location: $0";
-$fn='.' unless( length $fn );
+$s=Linux::Smaps->new;
+
+$old=Linux::Smaps->new;
+
+ok $s, 'constructor';
+
+ok scalar grep( {$_->file_name=~/perl/} $s->vmas), 'perl found';
+
+my ($newlist, $difflist, $oldlist)=$s->diff( $s );
+
+ok @$newlist==0 && @$difflist==0 && @$oldlist==0, 'no diff';
+
+my $dirty=$s->private_dirty;
+{
+  no warnings qw{void};
+  "a"x(1024*1024);
+}
+$s->update;
+print "# dirty grows from $dirty to ".$s->private_dirty."\n";
+ok $s->private_dirty>$dirty+1024, 'dirty has grown';
+
+($newlist, $difflist, $oldlist)=$s->diff( $old );
+my ($newlist2, $difflist2, $oldlist2)=$old->diff( $s );
+
+ok eq_set($newlist, $oldlist2), 'newlist=oldlist2';
+ok eq_set($difflist, [map {[@{$_}[1,0]]} @$difflist2]), 'difflist=difflist2';
+ok eq_set($oldlist, $newlist2), 'oldlist=newlist2';
+
+my $pid; select undef, undef, undef, .2 until defined( $pid=fork );
+unless( $pid ) {
+  require Devel::Peek;
+  sleep 10;
+  exit 0;
+}
 
 SKIP: {
-  skip "Your kernel lacks /proc/PID/smaps support", 8
-    unless( -r '/proc/self/smaps' );
+  my $max=50;
+  select undef, undef, undef, .2
+    while $max-- and !check_readable $pid, qr/\bPeek\b/;
 
-  $s=Linux::Smaps->new;
-
-  $old=Linux::Smaps->new;
-
-  ok $s, 'constructor';
-
-  ok scalar grep( {$_->file_name=~/perl/} $s->vmas), 'perl found';
-
-  my ($newlist, $difflist, $oldlist)=$s->diff( $s );
-
-  ok @$newlist==0 && @$difflist==0 && @$oldlist==0, 'no diff';
-
-  my $dirty=$s->private_dirty;
-  {
-    no warnings qw{void};
-    "a"x(1024*1024);
+  unless($max>=0) {
+    kill 'KILL', $pid;
+    skip "Cannot find /Peek/ in /proc/$pid/smaps"=>1;
   }
-  $s->update;
-  print "# dirty grows from $dirty to ".$s->private_dirty."\n";
-  ok $s->private_dirty>$dirty+1024, 'dirty has grown';
 
-  ($newlist, $difflist, $oldlist)=$s->diff( $old );
-  my ($newlist2, $difflist2, $oldlist2)=$old->diff( $s );
-
-  ok eq_set($newlist, $oldlist2), 'newlist=oldlist2';
-  ok eq_set($difflist, [map {[@{$_}[1,0]]} @$difflist2]), 'difflist=difflist2';
-  ok eq_set($oldlist, $newlist2), 'oldlist=newlist2';
-
-  my $pid; sleep 1 until defined( $pid=fork );
-  unless( $pid ) {
-    exec $^X, '-MPOSIX', '-e', 'sleep 10';
-    die;
-  }
-  select undef, undef, undef, .2;  # let the child start up
   $s->pid=$pid; $s->update;
-  ok scalar( grep {$_->file_name=~/POSIX\.so$/} $s->vmas ), 'other process';
+  ok scalar( grep {$_->file_name=~/Peek\.so$/} $s->vmas ), 'other process';
   kill 'KILL', $pid;
 }
 

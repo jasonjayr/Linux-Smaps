@@ -43,15 +43,16 @@ SKIP: {
 SKIP: {
   skip "64bit overflow not checked on 64bit perl", 1
     if( $Config::Config{use64bitint} || $Config::Config{use64bitall} );
-  eval {$s=Linux::Smaps->new(filename=>$fn.'/t/smaps64')};
-  ok( $@=~/Integer overflow in hexadecimal number/, "integer overflow" );
+  eval {(Linux::Smaps->new(filename=>$fn.'/t/smaps64')->vmas)[0]->vma_start};
+  like( $@, qr/Integer overflow in hexadecimal number/, "integer overflow" );
 }
 
 my $s1=Linux::Smaps->new(filename=>$fn.'/t/double-vdso');
 my $s2=Linux::Smaps->new(filename=>$fn.'/t/single-vdso');
 
 my ($newlist, $difflist, $oldlist)=$s1->diff( $s2 );
-ok @$newlist==0 && @$difflist==0 && @$oldlist==0, 'double-vdso match single-vdso';
+ok @$newlist==0 && @$difflist==0 && @$oldlist==0,
+  'double-vdso match single-vdso';
 
 # Local Variables:
 # mode: perl
