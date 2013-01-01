@@ -227,8 +227,7 @@ DESCRIPTION
     kernel. As long as the corresponding smaps file lines match
     "^(\w+):\s*(\d+) kB$" new accessor methods are created.
 
-    At the time of this writing at least one new field ("referenced") is on
-    the way but all my kernels still lack it.
+    See also "EXPORT" below.
 
 Example: The copy-on-write effect
      use strict;
@@ -313,7 +312,36 @@ A special note on copy on write measurements
     swappable.
 
 EXPORT
-    Not an Exporter;
+    The module's "import()" method is implemented as follows:
+
+     my $once;
+     sub import {
+       my $class=shift;
+       unless( $once ) {
+         $once=1;
+         eval {$class->new(@_)};
+       }
+     }
+
+    Thus, the first
+
+     use Linux::Smaps;
+
+    initializes all methods according to your current kernel.
+
+    To avoid that use
+
+     use Linux::Smaps ();
+
+    If your "proc" filesystem is mounted elsewhere or if you want to
+    initialize the methods according to a certain file you can achieve this
+    by
+
+     use Linux::Smaps (procdir=>'/procfs');
+
+    or
+
+     use Linux::Smaps (filename=>'/path');
 
 SEE ALSO
     Linux Kernel.

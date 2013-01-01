@@ -1,13 +1,17 @@
 use Test::More tests => 13;
 use POSIX ();
-use Linux::Smaps;
 
 POSIX::setlocale( &POSIX::LC_ALL, "C" );
 my ($s, $old);
 
-my $fn=$0;
-$fn=~s!/*t/+[^/]*$!! or die "Wrong test script location: $0";
-$fn='.' unless( length $fn );
+my $fn;
+BEGIN {
+  $fn=$0;
+  $fn=~s!/*t/+[^/]*$!! or die "Wrong test script location: $0";
+  $fn='.' unless( length $fn );
+}
+
+use Linux::Smaps (filename=>$fn.'/t/smaps');
 
 $s=Linux::Smaps->new(uninitialized=>1);
 $s->filename=$fn.'/t/smaps';

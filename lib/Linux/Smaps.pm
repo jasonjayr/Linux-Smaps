@@ -4,6 +4,7 @@ use 5.008;
 use strict;
 use warnings FATAL=>'all';
 no warnings qw(uninitialized portable);
+use Errno qw/EACCES/;
 
 my $min_vma_off;
 
@@ -80,7 +81,7 @@ BEGIN {
   }
 }
 
-our $VERSION = '0.09';
+our $VERSION = '0.10';
 
 sub new {
   my $class=shift;
@@ -143,6 +144,9 @@ sub update {
     $name=$I->[M_procdir].'/'.$I->[M_pid].'/smaps';
   }
 
+  # Normally, access permissions for a file are checked when it is opened.
+  # /proc/PID/smaps is different. Here permissions are checked by the read
+  # syscall.
   open my $f, '<', $name or do {
     $I->[M_lasterror]="Cannot open $name: $!";
     return;
@@ -154,6 +158,7 @@ sub update {
   my $l;
   my $current_off=@Linux::Smaps::VMA::attributes;
 
+  $!=0;
   while( defined($l=<$f>) ) {
     if( $current_off<@Linux::Smaps::VMA::attributes ) {
       no warnings qw(numeric);
@@ -219,6 +224,12 @@ sub update {
       $I->[M_lasterror]="$name($.): not parsed: $l";
       return;
     }
+  }
+
+  if( $!==EACCES and !defined $current ) {
+    $I->[M_lasterror]="$name: read failed: $!";
+    close $f;
+    return;
   }
 
   close $f;
@@ -386,6 +397,17 @@ sub diff {
 }
 
 sub vmas {return @{$_[0]->_elem};}
+
+{
+  my $once;
+  sub import {
+    my $class=shift;
+    unless( $once ) {
+      $once=1;
+      eval {$class->new(@_)};
+    }
+  }
+}
 
 1;
 __END__
@@ -664,8 +686,7 @@ the module extendable as new features are added to the smaps file by the
 kernel. As long as the corresponding smaps file lines match
 C<^(\w+):\s*(\d+) kB$> new accessor methods are created.
 
-At the time of this writing at least one new field (C<referenced>) is on
-the way but all my kernels still lack it.
+See also L</EXPORT> below.
 
 =head1 Example: The copy-on-write effect
 
@@ -751,7 +772,35 @@ by the children. So all private pages of the children are swappable.
 
 =head1 EXPORT
 
-Not an Exporter;
+The module's C<import()> method is implemented as follows:
+
+ my $once;
+ sub import {
+   my $class=shift;
+   unless( $once ) {
+     $once=1;
+     eval {$class->new(@_)};
+   }
+ }
+
+Thus, the first
+
+ use Linux::Smaps;
+
+initializes all methods according to your current kernel.
+
+To avoid that use
+
+ use Linux::Smaps ();
+
+If your C<proc> filesystem is mounted elsewhere or if you want to initialize
+the methods according to a certain file you can achieve this by
+
+ use Linux::Smaps (procdir=>'/procfs');
+
+or
+
+ use Linux::Smaps (filename=>'/path');
 
 =head1 SEE ALSO
 

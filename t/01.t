@@ -1,6 +1,6 @@
 use Test::More tests => 11;
 use POSIX ();
-BEGIN { use_ok('Linux::Smaps') };
+BEGIN { require_ok('Linux::Smaps') };
 
 POSIX::setlocale( &POSIX::LC_ALL, "C" );
 my ($s, $old);

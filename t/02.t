@@ -33,11 +33,13 @@ my ($newlist, $difflist, $oldlist)=$s->diff( $s );
 
 ok @$newlist==0 && @$difflist==0 && @$oldlist==0, 'no diff';
 
-my $dirty=$s->private_dirty;
-{
-  no warnings qw{void};
-  "a"x(1024*1024);
+sub make_me_grow {
+  "a" x $_[0];
 }
+
+my $dirty=$s->private_dirty;
+make_me_grow 1024*1024;
+
 $s->update;
 print "# dirty grows from $dirty to ".$s->private_dirty."\n";
 ok $s->private_dirty>$dirty+1024, 'dirty has grown';
