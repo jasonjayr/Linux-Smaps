@@ -41,6 +41,12 @@ BEGIN {
       $Linux::Smaps::VMA::attr_idx{$attributes[$n]}=$n;
     }
     $min_vma_off=@attributes;
+
+    our %special=
+      (
+       vmflags=>sub {my @l=split /\s+/, $_[0]; shift @l; \@l},
+      );
+    our @special;
   }
 
   sub new {bless [@_[1..$#_]]=>(ref $_[0] ? ref $_[0] : $_[0])}
@@ -81,7 +87,7 @@ BEGIN {
   }
 }
 
-our $VERSION = '0.10';
+our $VERSION = '0.11';
 
 sub new {
   my $class=shift;
@@ -155,16 +161,20 @@ sub update {
   my $current;
   $I->[M__elem]=[];
   my %cache;
-  my $l;
+  my ($l, $tmp, $m);
   my $current_off=@Linux::Smaps::VMA::attributes;
 
   $!=0;
   while( defined($l=<$f>) ) {
     if( $current_off<@Linux::Smaps::VMA::attributes ) {
-      no warnings qw(numeric);
-      $current->[$current_off++]=0+(unpack $fmt1, $l)[0];
+      if( $tmp=$Linux::Smaps::VMA::special[$current_off] ) {
+        $current->[$current_off++]=$tmp->($l);
+      } else {
+        no warnings qw(numeric);
+        $current->[$current_off++]=0+(unpack $fmt1, $l)[0];
+      }
     } elsif( $l=~/^(\w+):\s*(\d+) kB$/ ) {
-      my $m=lc $1;
+      $m=lc $1;
 
       if( exists $Linux::Smaps::VMA::attributes{$m} ) {
 	$I->[M_lasterror]="Linux::Smaps::VMA::$m method is already defined";
@@ -211,6 +221,24 @@ sub update {
       if( length($m)>$cnt1 ) {
 	$cnt1=length($m);
 	$fmt1="x".($cnt1+1)."A*";
+      }
+    } elsif( $l=~/^(\w+):.+$/ and $tmp=$Linux::Smaps::VMA::special{$m=lc $1} ) {
+      if( exists $Linux::Smaps::VMA::attributes{$m} ) {
+	$I->[M_lasterror]="Linux::Smaps::VMA::$m method is already defined";
+	return;
+      }
+
+      $Linux::Smaps::VMA::special[$current_off]=$tmp;
+      $current->[$current_off++]=$tmp->($l);
+
+      push @Linux::Smaps::VMA::attributes, $m;
+      {
+	no strict 'refs';
+	my $n=$#Linux::Smaps::VMA::attributes;
+	*{'Linux::Smaps::VMA::'.$m}=
+	  $Linux::Smaps::VMA::attributes{$m}=
+	    sub : lvalue {@_>1 ? $_[0]->[$n]=$_[1] : $_[0]->[$n]};
+	$Linux::Smaps::VMA::attr_idx{$m}=$n;
       }
     } elsif( $l=~/^([\da-f]+-[\da-f]+)\s/i ) {
       # the rest of the line is lazily parsed
