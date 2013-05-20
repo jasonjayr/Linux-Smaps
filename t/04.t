@@ -11,6 +11,9 @@ if ($init_exists) {
 } elsif (!$!{EPERM}) {
   plan skip_all => "Unexpected: pid=$init_pid does not exist, skipping this test...";
   exit 0;
+} elsif (do {my $f; open $f, '<', "/proc/$init_pid/smaps" and defined(<$f>)}) {
+  plan skip_all => "/proc/1/smaps is readable";
+  exit 0;
 }
 
 plan tests => 4;
