@@ -11,29 +11,24 @@ BEGIN {
   $fn='.' unless( length $fn );
 }
 
-use Linux::Smaps;
+use Linux::Smaps ();
 
 eval {require Config};
 SKIP: {
-  skip "64bit support not checked on non-64bit perl", 11
+  skip "non-64bit perl", 11
     unless( $Config::Config{use64bitint} || $Config::Config{use64bitall} );
   my $s=eval {Linux::Smaps->new(filename=>$fn.'/t/smaps-VmFlags')};
   isa_ok $s, 'Linux::Smaps';
-  if( $s ) {
-    is_deeply +($s->vmas)[0]->vmflags, [qw/rd ex mr mw me dw/], 'vmflags';
-    is +($s->vmas)[0]->file_name, '/bin/cat', 'filename';
-    is_deeply $s->heap->vmflags, [qw/rd wr mr mw me ac/], '[heap] vmflags';
-    is $s->heap->file_name, '[heap]', '[heap] filename';
-    is_deeply $s->stack->vmflags, [qw/rd wr mr mw me gd ac/], '[stack] vmflags';
-    is $s->stack->file_name, '[stack]', '[stack] filename';
-    is_deeply $s->vdso->vmflags, [qw/rd ex mr mw me de/], '[vdso] vmflags';
-    is $s->vdso->file_name, '[vdso]', '[vdso] filename';
-    is_deeply $s->vsyscall->vmflags, [qw/rd ex/], '[vsyscall] vmflags';
-    is $s->vsyscall->file_name, '[vsyscall]', '[vsyscall] filename';
-  } else {
-    skip 'precondition failed', 10;
-    #ok 0 for (1..10);
-  }
+  is_deeply +($s->vmas)[0]->vmflags, [qw/rd ex mr mw me dw/], 'vmflags';
+  is +($s->vmas)[0]->file_name, '/bin/cat', 'filename';
+  is_deeply $s->heap->vmflags, [qw/rd wr mr mw me ac/], '[heap] vmflags';
+  is $s->heap->file_name, '[heap]', '[heap] filename';
+  is_deeply $s->stack->vmflags, [qw/rd wr mr mw me gd ac/], '[stack] vmflags';
+  is $s->stack->file_name, '[stack]', '[stack] filename';
+  is_deeply $s->vdso->vmflags, [qw/rd ex mr mw me de/], '[vdso] vmflags';
+  is $s->vdso->file_name, '[vdso]', '[vdso] filename';
+  is_deeply $s->vsyscall->vmflags, [qw/rd ex/], '[vsyscall] vmflags';
+  is $s->vsyscall->file_name, '[vsyscall]', '[vsyscall] filename';
 }
 
 # Local Variables:

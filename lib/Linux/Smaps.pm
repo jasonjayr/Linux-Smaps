@@ -87,7 +87,7 @@ BEGIN {
   }
 }
 
-our $VERSION = '0.12';
+our $VERSION = '0.13';
 
 sub new {
   my $class=shift;
@@ -254,7 +254,8 @@ sub update {
     }
   }
 
-  if( $!==EACCES and !defined $current ) {
+  if( $.==0 ) {                 # nothing read
+    $!||=EACCES;                # some kernels just report it as an empty file
     $I->[M_lasterror]="$name: read failed: $!";
     close $f;
     return;
