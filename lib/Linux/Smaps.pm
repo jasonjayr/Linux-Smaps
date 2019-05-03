@@ -45,6 +45,8 @@ BEGIN {
     our %special=
       (
        vmflags=>sub {my @l=split /\s+/, $_[0]; shift @l; \@l},
+       # see man pkeys(7) in a sufficently new linux version.
+       protectionkey => sub { my ($key) =  $_[0] =~ m/ProtectionKey:\s+(.+)$/; $key;  },
       );
     our @special;
   }
